@@ -66,7 +66,7 @@ Provide only the search query as plain text. Do not include any extra commentary
     // Step 2: Call the serper.dev API using Axios.
     const serperData = JSON.stringify({
       q: xrayQuery,
-      num: 10
+      num: 100
     });
     const serperConfig = {
       method: 'post',
