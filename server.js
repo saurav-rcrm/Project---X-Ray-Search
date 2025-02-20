@@ -4,8 +4,13 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config();
 
+const OpenAI = require("openai");
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // Middleware to parse JSON and URL-encoded data
 app.use(express.json());
@@ -15,43 +20,147 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 /**
+ * Helper function: Parse company name from candidate title.
+ * This function assumes the candidate title contains hyphen-separated segments
+ * and that the company is in one of the segments. Adjust as needed.
+ */
+function parseCompany(title) {
+  if (!title) return "";
+  const parts = title.split(" - ");
+  // For example, if title is "John Doe - Senior Product Manager - Microsoft", company is "Microsoft"
+  return parts.length >= 3 ? parts[parts.length - 1].trim() : "";
+}
+
+/**
+ * Helper function: Count words in a text.
+ */
+function countWords(text) {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).length;
+}
+
+/**
+ * For each candidate, call OpenAI individually to extract refined candidate details.
+ * The prompt instructs OpenAI to return a JSON object with keys: 
+ * name, title, company, summary, linkedin_url.
+ * We'll merge the profile_picture from the original filtered result.
+ */
+async function refineCandidate(candidate) {
+  const refinePrompt = `Extract candidate details in JSON format from the following candidate information.
+Return a JSON object with exactly these keys:
+  - name
+  - title
+  - company
+  - summary
+  - linkedin_url
+
+Candidate information (as JSON):
+${JSON.stringify(candidate, null, 2)}
+
+Notes:
+- Use the candidate information to determine the correct Name, Title, and Company.
+- If any field is missing, return it as an empty string.
+- Use the original description to generate a detailed summary (if the description has fewer than 50 words, generate a summary of about 200 words).
+- Do not include any additional commentary or formatting.
+`;
+  console.log("Refining candidate details for:", candidate.name);
+  let refinedCandidateText = "";
+  try {
+    // OpenAI streaming call for refining this candidate's details
+    const stream = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: 'system', content: refinePrompt }
+      ],
+      max_tokens: 1500,
+      temperature: 1,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+      response_format: { type: "text" },
+      stream: true,
+    });
+
+    for await (const chunk of stream) {
+      if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content) {
+        const content = chunk.choices[0].delta.content;
+        process.stdout.write(content);
+        refinedCandidateText += content;
+      }
+    }
+    console.log("\nFinished refining candidate.");
+    // Try to parse the refined candidate JSON.
+    let refined = JSON.parse(refinedCandidateText.trim());
+    // Ensure profile_picture is included from original data if not provided.
+    if (!refined.profile_picture) {
+      refined.profile_picture = candidate.profile_picture || "";
+    }
+    return refined;
+  } catch (error) {
+    console.error("Error refining candidate:", error.response ? error.response.data : error.message);
+    // Fallback: return original candidate fields (with empty refined fields)
+    return {
+      name: candidate.name || "",
+      title: "",
+      company: parseCompany(candidate.name),
+      summary: candidate.description || "",
+      linkedin_url: candidate.linkedin_url || "",
+      profile_picture: candidate.profile_picture || ""
+    };
+  }
+}
+
+/**
  * Endpoint: POST /api/process-job
- *
- * 1. Uses OpenAI (gpt-4o) to generate an X-Ray search query based on the job description.
- * 2. Uses that query to call the serper.dev API.
- * 3. Uses OpenAI (gpt-4o-mini) to standardize the candidate data into a JSON array.
- *    Each candidate object will have these keys: first_name, last_name, title, current_organization, linkedin, skills.
- * 4. Returns the standardized candidate data to the client.
+ * 
+ * Steps:
+ * 1. Generate an x-ray search query using your provided prompt (via OpenAI).
+ * 2. Call the Google Custom Search API with that query.
+ * 3. Filter the API response to extract preliminary candidate details:
+ *    - profile_picture (from og:image)
+ *    - name (from title)
+ *    - description (from og:description)
+ *    - linkedin_url (from item.link)
+ *    - company (parsed from title)
+ * 4. For each candidate (up to 10), make an individual OpenAI streaming call to refine details.
+ * 5. Stream each candidate's HTML table row (with columns: Sr No., Profile Picture, Name, Title, Company, Description, LI Profile) to the client.
  */
 app.post('/api/process-job', async (req, res) => {
   const { jobDescription } = req.body;
-  try {
-    // Step 1: Generate the X-Ray search query using OpenAI (gpt-4o)
-    const systemInstructions = `Construct a precise X-Ray search query based on the job_description to find suitable candidates on LinkedIn using serper.dev.
+  console.log("Received job description:", jobDescription);
 
-Analyze the job description to extract key skills, qualifications, experience, and attributes, then formulate a search query accordingly.
+  // Set response header for HTML streaming
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+
+  try {
+    // Step 1: Generate x-ray search query using OpenAI with your prompt
+    const xrayPrompt = `Generate a concise x-ray search query for finding candidates on LinkedIn using the Google Search API based on a given job description or candidate requirements.
 
 # Steps
-1. **Analyze the Job Description**:
-   - Review the job_description.
-   - Identify and extract key skills, qualifications, and experiences.
-2. **Develop an X-Ray Search Strategy**:
-   - Construct a search query using Boolean operators (AND, OR).
-   - Ensure the query is structured for use with serper.dev to search LinkedIn profiles.
-
+- Analyze the given job description or candidate requirements.
+- Identify key skills, roles, and terms that are relevant.
+- Use search operators to refine the search:
+  - Utilize \`site:linkedin.com/in/ OR site:linkedin.com/pub/\` to focus on LinkedIn profiles.
+  - Use \`AND\` for mandatory skills or terms.
+  - Use \`OR\` to broaden searches.
+  - Use \`-\` to exclude terms.
+  - Use \`*\` as a wildcard.
+  
 # Output Format
-Provide only the search query as plain text. Do not include any extra commentary.`;
+- Provide the search query as a single string without any additional comment, characters like triple backticks, hastag, etc. `;
 
+    console.log("Generating x-ray search query...");
     const openAIQueryResponse = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages: [
-          { role: 'system', content: systemInstructions },
+          { role: 'system', content: xrayPrompt },
           { role: 'user', content: jobDescription }
         ],
-        max_tokens: 100,
-        temperature: 1
+        max_tokens: 1000,
+        temperature: 1,
+        response_format: { type: "text" }
       },
       {
         headers: {
@@ -61,97 +170,171 @@ Provide only the search query as plain text. Do not include any extra commentary
       }
     );
     const xrayQuery = openAIQueryResponse.data.choices[0].message.content.trim();
-    console.log('X-Ray Query:', xrayQuery);
+    console.log("X-Ray Query:", xrayQuery);
+    res.write(`<p><strong>X-Ray Query:</strong> ${xrayQuery}</p>`);
 
-    // Step 2: Call the serper.dev API using Axios.
-    const serperData = JSON.stringify({
-      q: xrayQuery,
-      num: 25
+    // Step 2: Call the Google Custom Search API
+    const googleUrl = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}&cx=${process.env.GOOGLE_CX}&q=${encodeURIComponent(xrayQuery)}`;
+    console.log("Calling Google Custom Search API:", googleUrl);
+    const googleResponse = await axios.get(googleUrl);
+    console.log("Google API Response received.");
+
+    // Step 3: Filter the response to extract preliminary candidate details
+    const preliminaryCandidates = (googleResponse.data.items || []).map((item, idx) => {
+      let ogData = {};
+      if (item.pagemap && item.pagemap.metatags && item.pagemap.metatags.length > 0) {
+        ogData = item.pagemap.metatags[0];
+      }
+      const candidateName = item.title || "";
+      return {
+        srNo: idx + 1,
+        profile_picture: ogData["og:image"] || "",
+        name: candidateName,
+        description: ogData["og:description"] || "",
+        linkedin_url: item.link || "",
+        // We may extract company from the candidate name; refine if needed.
+        company: parseCompany(candidateName)
+      };
     });
-    const serperConfig = {
-      method: 'post',
-      maxBodyLength: Infinity,
-      url: 'https://google.serper.dev/search',
-      headers: { 
-        'X-API-KEY': process.env.SERPER_API_KEY, 
-        'Content-Type': 'application/json'
-      },
-      data: serperData
-    };
+    console.log("Preliminary Candidates:", preliminaryCandidates);
 
-    const serperResponse = await axios.request(serperConfig);
-    console.log("Full serper.dev Response:", JSON.stringify(serperResponse.data, null, 2));
+    // Begin streaming the HTML table header
+    res.write(`<!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>Candidate Results</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { padding: 10px; border: 1px solid #ddd; vertical-align: middle; }
+          th { background: #007BFF; color: #fff; }
+          img { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; }
+          a { color: #007BFF; }
+        </style>
+      </head>
+      <body>
+        <h2>Candidate Results</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Sr No.</th>
+              <th>Profile Picture</th>
+              <th>Name</th>
+              <th>Title</th>
+              <th>Company</th>
+              <th>Description</th>
+              <th>LI Profile</th>
+            </tr>
+          </thead>
+          <tbody>
+    `);
 
-    // Use serper.dev response as candidate data.
-    let candidateData = serperResponse.data;
-    // If no candidates are returned, assign an empty array.
-    if (!candidateData.organic || candidateData.organic.length === 0) {
-      console.warn("No candidate details returned from serper.dev. Returning no candidates.");
-      candidateData = { candidates: [] };
-    }
-    
-    // Step 3: Standardize candidate data using OpenAI (gpt-4o-mini)
-    // Instruct it to return a JSON array of candidate objects with keys: first_name, last_name, title, current_organization, linkedin, skills.
-    const jsonOutputSystemInstruction = `Generate a JSON array of candidate objects based on the following candidate data.
-Each candidate object must have exactly these keys: "first_name", "last_name", "title", "current_organization", "linkedin", "skills".
-Extract the first name and last name from the full name (split on the first space).
-If separate fields for job title and company are available, assign them to "title" and "current_organization" respectively.
-Use the candidate data exactly as provided. Do not include any additional commentary or formatting.`;
+    // Step 4: Process each candidate individually and stream its table row
+    for (let i = 0; i < Math.min(10, preliminaryCandidates.length); i++) {
+      let prelim = preliminaryCandidates[i];
+      console.log(`Processing candidate ${i+1}: ${prelim.name}`);
 
-    const openAIJsonResponse = await axios.post(
-      'https://api.openai.com/v1/chat/completions',
-      {
-        model: "gpt-4o-mini",
-        messages: [
-          { role: 'system', content: jsonOutputSystemInstruction },
-          { role: 'user', content: JSON.stringify(candidateData, null, 2) }
-        ],
-        max_tokens: 10000,
-        temperature: 1,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-        }
-      }
-    );
-    const jsonCandidateOutput = openAIJsonResponse.data.choices[0].message.content.trim();
-    let standardizedCandidateData;
-    try {
-      standardizedCandidateData = JSON.parse(jsonCandidateOutput);
-    } catch(e) {
-      console.error("Error parsing standardized candidate data:", e);
-      if (candidateData.candidates) {
-        standardizedCandidateData = candidateData.candidates.map(cand => {
-          let parts = (cand.name || "").trim().split(" ");
-          return {
-            first_name: parts.shift() || "",
-            last_name: parts.join(" ") || "",
-            title: cand.title || "",
-            current_organization: cand.current_organization || "",
-            linkedin: cand.linkedin || "",
-            skills: Array.isArray(cand.skills) ? cand.skills.join(", ") : (cand.skills || "")
-          };
+      // Build a prompt for refining this candidate's details
+      const refinePrompt = `Extract candidate details in JSON format from the following candidate information.
+Return a JSON object with exactly these keys:
+  - name
+  - title
+  - company
+  - summary
+  - linkedin_url
+
+Candidate information (in JSON):
+${JSON.stringify(prelim, null, 2)}
+
+Notes:
+- Use the candidate information to determine the correct Name, Title, and Company.
+- If the description (summary) is less than 50 words, expand it to about 200 words.
+- Do not include any additional commentary or formatting.`;
+
+      // Stream the refined candidate details from OpenAI
+      console.log(`Refining candidate ${i+1} details...`);
+      let refinedCandidateText = "";
+      try {
+        const candidateStream = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: 'system', content: refinePrompt }
+          ],
+          max_tokens: 1500,
+          temperature: 1,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+          response_format: { type: "text" },
+          stream: true,
         });
-      } else {
-        standardizedCandidateData = [];
+        for await (const chunk of candidateStream) {
+          if (chunk.choices && chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content) {
+            const content = chunk.choices[0].delta.content;
+            process.stdout.write(content);
+            refinedCandidateText += content;
+          }
+        }
+      } catch (error) {
+        console.error(`Error refining candidate ${i+1}:`, error.response ? error.response.data : error.message);
+        refinedCandidateText = JSON.stringify({
+          name: prelim.name,
+          title: "",
+          company: prelim.company,
+          summary: prelim.description,
+          linkedin_url: prelim.linkedin_url
+        });
       }
+
+      // Parse the refined candidate details
+      let refined;
+      try {
+        refined = JSON.parse(refinedCandidateText.trim());
+      } catch (e) {
+        console.error(`Error parsing candidate ${i+1} refined JSON:`, e);
+        refined = {
+          name: prelim.name,
+          title: "",
+          company: prelim.company,
+          summary: prelim.description,
+          linkedin_url: prelim.linkedin_url
+        };
+      }
+      // Ensure profile_picture is carried over from preliminary data
+      refined.profile_picture = prelim.profile_picture || "";
+
+      // Build the HTML table row for this candidate
+      let rowHtml = `
+        <tr>
+          <td>${i + 1}</td>
+          <td><img src="${refined.profile_picture || 'https://via.placeholder.com/50'}" alt="Profile Picture"></td>
+          <td>${refined.name}</td>
+          <td>${refined.title}</td>
+          <td>${refined.company}</td>
+          <td>${refined.summary}</td>
+          <td><a href="${refined.linkedin_url}" target="_blank">LI Profile</a></td>
+        </tr>
+      `;
+      res.write(rowHtml);
+      console.log(`Streamed candidate ${i+1} row.`);
     }
-    
-    console.log("Standardized Candidate Data:", standardizedCandidateData);
-    
-    // Step 4: Return the standardized candidate data to the client.
-    res.json({ candidateData: standardizedCandidateData });
+
+    // End the HTML table and document
+    res.write(`
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `);
+    console.log("Finished streaming HTML table.");
+    res.end();
   } catch (error) {
-    console.error('Error processing job description:', error.response ? error.response.data : error.message);
-    res.status(500).json({ error: 'Error processing job description.' });
+    console.error("Error processing job description:", error.response ? error.response.data : error.message);
+    res.status(500).send("Error processing job description.");
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
