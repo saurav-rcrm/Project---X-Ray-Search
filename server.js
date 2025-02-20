@@ -140,7 +140,8 @@ app.post('/api/process-job', async (req, res) => {
 - Analyze the given job description or candidate requirements.
 - Identify key skills, roles, and terms that are relevant.
 - Use search operators to refine the search:
-  - Utilize \`site:linkedin.com/in/ OR site:linkedin.com/pub/\` to focus on LinkedIn profiles.
+  - Utilize \`site:{country_code}.linkedin.com/in/ OR site:linkedin.com/pub/\` to focus on LinkedIn profiles. 
+  - If the location is the United Kingdom, use site:uk.linkedin.com/in/ for UK-specific profiles. Adjust similarly for other countries as needed.
   - Use \`AND\` for mandatory skills or terms.
   - Use \`OR\` to broaden searches.
   - Use \`-\` to exclude terms.
