@@ -142,6 +142,7 @@ app.post('/api/process-job', async (req, res) => {
 - Use search operators to refine the search:
   - Utilize \`site:{country_code}.linkedin.com/in/ OR site:linkedin.com/pub/\` to focus on LinkedIn profiles. 
   - If the location is the United Kingdom, use site:uk.linkedin.com/in/ for UK-specific profiles. Adjust similarly for other countries as needed.
+  - If a company name is mentioned use intitle:{company_name} 
   - Use \`AND\` for mandatory skills or terms.
   - Use \`OR\` to broaden searches.
   - Use \`-\` to exclude terms.
@@ -189,7 +190,7 @@ app.post('/api/process-job', async (req, res) => {
       const candidateName = item.title || "";
       return {
         srNo: idx + 1,
-        profile_picture: ogData["og:image"] || "",
+        profile_picture: ogData["twitter:image"] || "",
         name: candidateName,
         description: ogData["og:description"] || "",
         linkedin_url: item.link || "",
