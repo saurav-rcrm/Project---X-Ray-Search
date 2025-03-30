@@ -770,6 +770,20 @@
       document.getElementById('shortcutHint').textContent = hintText;
     }
     setShortcutHint();
+    const currentEmployerInput = document.getElementById('currentEmployer');
+  
+    currentEmployerInput.addEventListener('input', () => {
+      let value = currentEmployerInput.value.trim();
+      const prefix = "Preferred Company: ";
+  
+      if (value.toLowerCase().startsWith(prefix.toLowerCase())) {
+        value = value.slice(prefix.length).trim();
+      }
+  
+      if (value !== "") {
+        currentEmployerInput.value = prefix + value;
+      }
+    });
 
     function checkInput() {
       const mode = document.querySelector('input[name="searchMode"]:checked').value;
