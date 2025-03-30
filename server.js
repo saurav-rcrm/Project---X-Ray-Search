@@ -134,22 +134,37 @@ app.post('/api/process-job', async (req, res) => {
 
   try {
     // Step 1: Generate x-ray search query using OpenAI with your prompt
-    const xrayPrompt = `Generate a concise x-ray search query for finding candidates on LinkedIn using the Google Search API based on a given job description or candidate requirements.
+    const xrayPrompt = `You are an expert at crafting Google X-Ray Search queries to find the most relevant LinkedIn profiles.
+Think step-by-step to create an effective and compact query.
 
-# Steps
-- Analyze the given job description or candidate requirements.
-- Identify key skills, roles, and terms that are relevant.
-- Use search operators to refine the search:
-  - Utilize \`site:{country_code}.linkedin.com/in/ OR site:linkedin.com/pub/\` to focus on LinkedIn profiles. 
-  - If the location is the United Kingdom, use site:uk.linkedin.com/in/ for UK-specific profiles. Adjust similarly for other countries as needed.
-  - If a company name is mentioned use intitle:{company_name} 
-  - Use \`AND\` for mandatory skills or terms.
-  - Use \`OR\` to broaden searches.
-  - Use \`-\` to exclude terms.
-  - Use \`*\` as a wildcard.
-  
-# Output Format
-- Provide the search query as a single string without any additional comment, characters like triple backticks, hastag, etc. `;
+Step-by-Step Instructions:
+1. Extract:
+- Job title
+- 3 to 5 core skills or keywords
+- Domain/industry (e.g., SaaS, Fintech, Automobile, etc.)
+- Country or location (if present)
+- Preferred or Target Company names (mentioned in the JD)
+
+2. Determine if this is a fresher/entry-level role:
+- Check for phrases like: fresher, graduate, trainee, training program, entry-level
+
+3. Decide on exclusions:
+- If it is NOT a fresher role, use -intern -student
+- If it IS a fresher role, do NOT include exclusions like -intern -student
+
+4. Decide on company usage:
+- If the company mentioned is the hiring company, do NOT include it
+- If other companies are mentioned as preferred backgrounds, include them using intitle:{company}
+- If the job description does NOT mention any company names, do NOT include or guess any.
+
+5. Construct the X-Ray query using:
+- Include the job title, skills, and the domain/industry if available
+- site:{country_code}.linkedin.com/in/
+- Enclose multi-word phrases in quotes (e.g., "Product Manager", etc.)
+- Use AND only when needed, use OR to offer alternatives
+
+Output Format:
+- Output only the final Google search query (as plain text, no backticks or explanation).`;
 
     console.log("Generating x-ray search query...");
     const openAIQueryResponse = await axios.post(
