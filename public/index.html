@@ -40,7 +40,6 @@ table th{background:#007bff;color:#fff;font-weight:500}
 table td img{width:60px;height:60px;border-radius:50%;object-fit:cover}
 table a{color:#007bff;text-decoration:none}
 table a:hover{text-decoration:underline}
-/* highlight */
 .highlight{background:#dfbf8aec}
 </style>
 </head>
@@ -60,7 +59,7 @@ table a:hover{text-decoration:underline}
       <div class="field"><label for="country">Country:</label>
         <select id="country">
           <option value="">Select a country</option>
-          <!-- country list trimmed -->
+          <!-- country options trimmed for brevity -->
             <option value="Afghanistan">Afghanistan</option>
             <option value="Aland Islands">Aland Islands</option>
             <option value="Albania">Albania</option>
@@ -303,6 +302,7 @@ table a:hover{text-decoration:underline}
             <option value="Yemen">Yemen</option>
             <option value="Zambia">Zambia</option>
             <option value="Zimbabwe">Zimbabwe</option>
+          <!-- … keep the rest of the original list … -->
         </select>
       </div>
       <div class="field"><label for="jobTitle">Job Title:</label><input type="text" id="jobTitle" placeholder="e.g., Product Manager"/></div>
@@ -345,6 +345,33 @@ const loadingWrap  =document.getElementById('loadingContainer');
 const loadingMsg   =document.getElementById('loadingMessage');
 let highlightTerms=[];
 
+/* ----------  STOPWORDS ---------- */
+const STOPWORDS=new Set([
+'a','about','above','across','after','again','against','along','amid','among',
+  'an','and','any','are','aren\'t','around','as','at','based','be','because','been',
+  'before','behind','being','below','beneath','beside','besides','between',
+  'beyond','both','but','by','can\'t','cannot','concerning','considering',
+  'could','couldn\'t','despite','did','didn\'t','do','does','doesn\'t','doing',
+  'don\'t','down','during','each','except','excluding','few','following','for',
+  'from','further','had','hadn\'t','has','hasn\'t','have','haven\'t','having',
+  'he','he\'d','he\'ll','he\'s','her','here','here\'s','hers','herself','him',
+  'himself','his','how','how\'s','i','i\'d','i\'ll','i\'m','i\'ve','if','in',
+  'inside','into','is','isn\'t','it','it\'s','its','itself','let\'s','like',
+  'me','minus','more','most','mustn\'t','my','myself','near','no','nor','not',
+  'of','off','on','once','only','onto','opposite','or','other','ought','our',
+  'ours','ourselves','out','outside','over','own','past','per','plus',
+  'regarding','round','same','save','shan\'t','she','she\'d','she\'ll','she\'s',
+  'should','shouldn\'t','since','so','some','such','than','that','that\'s',
+  'the','their','theirs','them','themselves','then','there','there\'s','these',
+  'they','they\'d','they\'ll','they\'re','they\'ve','this','those','through',
+  'throughout','till','to','too','toward','towards','under','underneath',
+  'until','unlike','up','upon','very','versus','via','was','wasn\'t','we',
+  'we\'d','we\'ll','we\'re','we\'ve','were','weren\'t','what','what\'s','when',
+  'when\'s','where','where\'s','which','while','who','who\'s','whom','why',
+  'why\'s','with','within','without','won\'t','would','wouldn\'t','you',
+  'you\'d','you\'ll','you\'re','you\'ve','your','yours','yourself','yourselves'
+]);
+const removeStopwords=arr=>arr.filter(t=>!STOPWORDS.has(t));
 
 /* ----------  UTILITIES ---------- */
 const escapeRegExp=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -489,11 +516,16 @@ async function handleFindCandidates(){
     if(!domain) domain=getLinkedInDomain(jobTitle)||getLinkedInDomain(incKW)||"linkedin.com";
 
     payload.jobDescription=`site:${domain}/in/ AND "${jobTitle}" AND "${incKW}" ${excKW?" -'"+excKW+"'":""} ${employer||""}`;
-    highlightTerms=[...new Set([...parseQueryTerms(payload.jobDescription),...incKW.split(/[,;\s]+/).map(t=>t.toLowerCase())])];
+    highlightTerms=removeStopwords(
+      [...new Set([
+        ...parseQueryTerms(payload.jobDescription),
+        ...incKW.split(/[,;\s]+/).map(t=>t.toLowerCase())
+      ])]
+    );
   }else{
     payload.jobDescription=document.getElementById('aiJobDescription').value;
     const words=[...new Set(payload.jobDescription.split(/\W+/).filter(w=>w.length>3))];
-    highlightTerms=words.slice(0,10).map(w=>w.toLowerCase());
+    highlightTerms=removeStopwords(words.slice(0,10).map(w=>w.toLowerCase()));
   }
 
   await fetchCandidatesStreaming(payload);

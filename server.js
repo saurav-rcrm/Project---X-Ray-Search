@@ -1,5 +1,6 @@
 /* ───────────────────────────────────────────────────────────────
-   X-Ray Search → Google CSE → Cerebras / OpenAI → HTML stream
+   X-Ray Search → Google CSE → Gemini / OpenAI → HTML stream
+   Candidate refinement → Cerebras / OpenAI
    ─────────────────────────────────────────────────────────────── */
 const express = require('express');
 const axios   = require('axios');
@@ -9,8 +10,8 @@ require('dotenv').config();
 const Cerebras = require('@cerebras/cerebras_cloud_sdk');
 const cerebras = new Cerebras({ apiKey: process.env.CEREBRAS_API_KEY });
 
-const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const OpenAI  = require('openai');
+const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /* ─── Server init ─────────────────────────────────────────────── */
 const app  = express();
@@ -27,7 +28,60 @@ function parseCompany(title = '') {
   return parts.length >= 3 ? parts[parts.length - 1].trim() : '';
 }
 
-/* Shared wrapper → Cerebras first, OpenAI fallback */
+/* ───────────  Gemini first (axios), OpenAI fallback  ─────────── */
+async function callGemini({ messages, max_tokens = 6000, temperature = 0.8, top_p = 1 }) {
+  /* pull out (single) system instruction */
+  const sysIdx  = messages.findIndex(m => m.role === 'system');
+  const sysText = sysIdx > -1 ? messages[sysIdx].content : '';
+  const userMsgs = messages.filter((_, i) => i !== sysIdx);
+
+  const contents = userMsgs.map(m => ({
+    parts: [{ text: m.content }],
+    /* role is optional; include when present */
+    ...(m.role ? { role: m.role } : {})
+  }));
+
+  const body = {
+    contents,
+    system_instruction: sysText
+      ? { parts: [{ text: sysText }] }
+      : undefined,
+    generationConfig: {
+      responseMimeType: 'text/plain',
+      maxOutputTokens: max_tokens,
+      temperature,
+      topP: top_p
+    }
+  };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  try {
+    const { data } = await axios.post(url, body);
+    const txt = data?.candidates?.[0]?.content?.parts
+      ?.map(p => p.text)
+      .join('')
+      .trim() || '';
+    /* keep only the last non-empty line to drop any “thinking” */
+    return txt.split('\n').filter(l => l.trim()).pop().trim();
+  } catch (err) {
+    const transient = err?.response?.status === 429 || /rate limit|ECONN|timeout/i.test(err.message || '');
+    if (!transient) throw err;
+
+    console.warn('Gemini unavailable → falling back to OpenAI');
+    const oa = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      max_tokens,
+      temperature,
+      top_p,
+      stream: false
+    });
+    return oa.choices[0].message.content.trim();
+  }
+}
+
+/* ──────────  Cerebras first, OpenAI fallback (for refine) ────── */
 async function callLLM({ messages, preferJson = false, max_tokens = 512, temperature = 0.8, top_p = 1 }) {
   const base = {
     messages,
@@ -44,7 +98,7 @@ async function callLLM({ messages, preferJson = false, max_tokens = 512, tempera
     });
     return resp.choices[0].message.content;
   } catch (err) {
-    const transient = err?.response?.status === 429 || /rate limit|ECONN|timed out/i.test(err.message || '');
+    const transient = err?.response?.status === 429 || /rate limit|ECONN|timeout/i.test(err.message || '');
     if (!transient) throw err;
     console.warn('Cerebras unavailable → falling back to OpenAI');
     const oa = await openai.chat.completions.create({
@@ -56,7 +110,7 @@ async function callLLM({ messages, preferJson = false, max_tokens = 512, tempera
   }
 }
 
-/* Google search + fallback without country code */
+/* ── Google search + retry (remove country code on 2nd try) ───── */
 async function googleSearchWithRetry(query) {
   const run = async q => {
     const url = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}` +
@@ -67,7 +121,7 @@ async function googleSearchWithRetry(query) {
   // try 1
   let { items, queryUsed } = await run(query);
   if (items.length) return { items, queryUsed };
-  // try 2 (remove country)
+  // try 2 (remove country filter)
   const q2 = query.replace(/site:[a-z]{2}\.linkedin\.com\/in\//i, 'site:linkedin.com/in/');
   if (q2 !== query) {
     ({ items, queryUsed } = await run(q2));
@@ -75,18 +129,17 @@ async function googleSearchWithRetry(query) {
   return { items, queryUsed };
 }
 
-/* Regenerate X-Ray query if none of the searches returned hits */
+/* ── Regenerate X-Ray query if nothing found first pass ───────── */
 async function regenerateXrayQuery(prevQuery, jobDescription) {
-  const system = `The previous Google X-Ray query returned no results. Please refine it by removing restrictive filters (such as country-specific site filters) and adjusting keywords, boolean operators between keywords to broaden the search while staying relevant. But never remove site:linkedin.com/in 
+  const system = `The previous Google X-Ray query returned no results. Please refine it by removing restrictive filters (such as country-specific site filters) and adjusting keywords, boolean operators between keywords to broaden the search while staying relevant. 
 Return only the new Google X-Ray query (plain text, no backticks or additional commentary at all).`;
   const user = `Job description:\n${jobDescription}\n\nPrevious query:\n${prevQuery}`;
-  return (await callLLM({
+  return (await callGemini({
     messages: [
       { role: 'system', content: system },
       { role: 'user',   content: user }
     ],
-    max_tokens: 1000,
-    temperature: 0.8
+    temperature: 1
   })).trim();
 }
 
@@ -99,7 +152,7 @@ app.post('/api/process-job', async (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
   try {
-    /* ── 1. Generate Google X-Ray query ─────────────────────── */
+    /* ── 1. Generate Google X-Ray query via Gemini ──────────── */
     const xrayPrompt = `You are an expert at crafting Google X-Ray Search queries to find the most relevant LinkedIn profiles.
 Think step-by-step to create an effective and compact query.
 
@@ -133,16 +186,14 @@ Step-by-Step Instructions:
 - Use AND OR boolean in all the X-ray search query
 - Keep the x-ray search query minimal for optimal & high quality  Google search results
 
-
 Output Format:
 - Output only the final Google search query (as plain text, no backticks or explanation).`;
 
-    let xrayQuery = (await callLLM({
+    let xrayQuery = (await callGemini({
       messages: [
         { role: 'system', content: xrayPrompt },
         { role: 'user',   content: jobDescription }
       ],
-      max_tokens: 500,
       temperature: 0.8
     })).trim();
 
@@ -150,13 +201,14 @@ Output Format:
     res.write(`<p><strong>X-Ray Query:</strong> ${xrayQuery}</p>`);
 
     /* ── 2. Google search with retry ─────────────────────────── */
-    let { items, queryUsed } = await googleSearchWithRetry(xrayQuery);
+    let { items } = await googleSearchWithRetry(xrayQuery);
 
     /* ── 3. If still no results → regenerate query & search again */
     if (!items.length) {
-      xrayQuery = await regenerateXrayQuery(xrayQuery, jobDescription);
+      const regenQuery = await regenerateXrayQuery(xrayQuery, jobDescription);
+      xrayQuery = regenQuery;
       res.write(`<p><em>Regenerated X-Ray Query:</em> ${xrayQuery}</p>`);
-      ({ items, queryUsed } = await googleSearchWithRetry(xrayQuery));
+      ({ items } = await googleSearchWithRetry(xrayQuery));
     }
 
     /* ── 4. Bail out if nothing found ───────────────────────── */
@@ -164,9 +216,6 @@ Output Format:
       res.write('<p style="color:red;">No candidates found after regenerating query.</p>');
       res.end();
       return;
-    }
-    if (queryUsed !== xrayQuery) {
-      res.write(`<p><em>Retried with generalized query:</em> ${queryUsed}</p>`);
     }
 
     /* ── 5. Preliminary candidate extraction ────────────────── */
@@ -199,7 +248,7 @@ Output Format:
         <th>Title</th><th>Company</th><th>Description</th><th>LI Profile</th>
       </tr></thead><tbody>`);
 
-    /* ── 7. Refine each candidate ───────────────────────────── */
+    /* ── 7. Refine each candidate (Cerebras → OpenAI fallback) ── */
     for (let i = 0; i < Math.min(10, prelim.length); i++) {
       const p = prelim[i];
 
