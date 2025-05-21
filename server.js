@@ -77,7 +77,7 @@ async function googleSearchWithRetry(query) {
 
 /* Regenerate X-Ray query if none of the searches returned hits */
 async function regenerateXrayQuery(prevQuery, jobDescription) {
-  const system = `The previous Google X-Ray query returned no results. Please refine it by removing restrictive filters (such as country-specific site filters) and adjusting keywords, boolean operators between keywords to broaden the search while staying relevant. 
+  const system = `The previous Google X-Ray query returned no results. Please refine it by removing restrictive filters (such as country-specific site filters) and adjusting keywords, boolean operators between keywords to broaden the search while staying relevant. But never remove site:linkedin.com/in 
 Return only the new Google X-Ray query (plain text, no backticks or additional commentary at all).`;
   const user = `Job description:\n${jobDescription}\n\nPrevious query:\n${prevQuery}`;
   return (await callLLM({
@@ -86,7 +86,7 @@ Return only the new Google X-Ray query (plain text, no backticks or additional c
       { role: 'user',   content: user }
     ],
     max_tokens: 1000,
-    temperature: 1
+    temperature: 0.8
   })).trim();
 }
 
@@ -131,6 +131,8 @@ Step-by-Step Instructions:
 - Enclose multi-word phrases in quotes (e.g., "Product Manager", etc.)
 - Use AND to add multiple required keywords, use OR to offer alternatives
 - Use AND OR boolean in all the X-ray search query
+- Keep the x-ray search query minimal for optimal & high quality  Google search results
+
 
 Output Format:
 - Output only the final Google search query (as plain text, no backticks or explanation).`;
