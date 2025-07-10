@@ -186,7 +186,7 @@ Step-by-Step Instructions:
 - Use AND OR boolean in all the X-ray search query
 - Keep the x-ray search query minimal for optimal & high quality  Google search results
 
-6. If the user query is not about a candidate search, then do not generate the x-ray query at all (this is a very important rule). You can simply return "Error: Not a candidate search".
+6. If the user query is not about a candidate search, then do not generate the x-ray query at all (this is a very important rule). You can simply return "Error: 422".
 
 Output Format:
 - Output only the final Google search query (as plain text, no backticks or explanation).`;
@@ -198,6 +198,13 @@ Output Format:
       ],
       temperature: 0.8
     })).trim();
+
+    // Early exit if Gemini returns an error (e.g., Error: 422)
+    if (/^error\s*:\s*422/i.test(xrayQuery)) {
+      res.write(`<p style="color:red;">X-Ray query could not be generated for this job description. (Error: 422)</p>`);
+      res.end();
+      return;
+    }
 
     console.log('X-Ray Query:', xrayQuery);
     res.write(`<p><strong>X-Ray Query:</strong> ${xrayQuery}</p>`);
