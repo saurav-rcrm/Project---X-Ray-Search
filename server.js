@@ -186,6 +186,8 @@ Step-by-Step Instructions:
 - Use AND OR boolean in all the X-ray search query
 - Keep the x-ray search query minimal for optimal & high quality  Google search results
 
+6. If the user query is not about a candidate search, then do not generate the x-ray query at all (this is a very important rule). You can simply return "Error: Not a candidate search".
+
 Output Format:
 - Output only the final Google search query (as plain text, no backticks or explanation).`;
 
