@@ -173,9 +173,10 @@ Step-by-Step Instructions:
 - If it IS a fresher role, do NOT include exclusions like -intern -student
 
 4. Decide on company usage:
-- If the company mentioned is the hiring company, do NOT include it
-- If other companies are mentioned as preferred backgrounds, include them using intitle:{company}
-- If the job description does NOT mention any company names, do NOT include or guess any.
+   - Hiring company: If the input or job description names the hiring company (the one hiring for this role), NEVER include this company in the query.
+   - Preferred/target company backgrounds: If company names are mentioned as *preferred/target backgrounds* (not the hiring company), include each company using intitle:"[Company]", e.g., intitle:"google" OR intitle:"amazon".
+   - No company names mentioned: If no company names are mentioned, do NOT invent or guess any; do not include any intitle: terms.
+   - Only use company names as described above; do not default to including known brands unless explicitly mentioned as preference/background.
 
 5. Construct the X-Ray query using:
 - Include the job title, skills, and the domain/industry if available
