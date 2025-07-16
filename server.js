@@ -54,9 +54,10 @@ async function callGemini({ messages, max_tokens = 6000, temperature = 0.8, top_
     }
   };
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent?key=${process.env.GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
   try {
+    console.log('[Gemini] POST', url, JSON.stringify(body));
     const { data } = await axios.post(url, body);
     const txt = data?.candidates?.[0]?.content?.parts
       ?.map(p => p.text)
@@ -65,6 +66,7 @@ async function callGemini({ messages, max_tokens = 6000, temperature = 0.8, top_
     /* keep only the last non-empty line to drop any “thinking” */
     return txt.split('\n').filter(l => l.trim()).pop().trim();
   } catch (err) {
+    console.error('[Gemini] Error:', err.response?.status, err.response?.data || err.message);
     const transient = err?.response?.status === 429 || /rate limit|ECONN|timeout/i.test(err.message || '');
     if (!transient) throw err;
 
@@ -92,12 +94,14 @@ async function callLLM({ messages, preferJson = false, max_tokens = 512, tempera
     stream: false
   };
   try {
+    console.log('[Cerebras] chat.completions.create', JSON.stringify(base));
     const resp = await cerebras.chat.completions.create({
       model: 'llama-4-scout-17b-16e-instruct',
       ...base
     });
     return resp.choices[0].message.content;
   } catch (err) {
+    console.error('[Cerebras] Error:', err.response?.status, err.response?.data || err.message);
     const transient = err?.response?.status === 429 || /rate limit|ECONN|timeout/i.test(err.message || '');
     if (!transient) throw err;
     console.warn('Cerebras unavailable → falling back to OpenAI');
@@ -115,8 +119,14 @@ async function googleSearchWithRetry(query) {
   const run = async q => {
     const url = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}` +
                 `&cx=${process.env.GOOGLE_CX}&q=${encodeURIComponent(q)}`;
-    const { data } = await axios.get(url);
-    return { items: data.items || [], queryUsed: q };
+    console.log('[GoogleSearch] GET', url);
+    try {
+      const { data } = await axios.get(url);
+      return { items: data.items || [], queryUsed: q };
+    } catch (err) {
+      console.error('[GoogleSearch] Error:', err.response?.status, err.response?.data || err.message);
+      throw err;
+    }
   };
   // try 1
   let { items, queryUsed } = await run(query);
