@@ -173,14 +173,14 @@ Step-by-Step Instructions:
 - Domain/industry (e.g., SaaS, Fintech, Automobile, etc.)
 - Country or location (if present)
 - Don't add 'location:{value}' rather just {value} when needed
-- Preferred or Target Company names (mentioned in the JD)
+- Preferred or Target Company names (e.g., intitle:"Google" OR intitle:"Recruit CRM")
 
 2. Determine if this is a fresher/entry-level role:
 - Check for phrases like: fresher, graduate, trainee, training program, entry-level
 
 3. Decide on exclusions:
-- If it is NOT a fresher role, use -intern -student
-- If it IS a fresher role, do NOT include exclusions like -intern -student
+- If it is NOT a fresher role, use -intitle:"intern" -intitle:"student"
+- If it IS a fresher role, do NOT include exclusions like -intitle:"intern" -intitle:"student"
 
 4. Decide on company usage:
    - Hiring company: If the input or job description names the hiring company (the one hiring for this role), NEVER include this company in the query.
@@ -188,7 +188,7 @@ Step-by-Step Instructions:
    - No company names mentioned: If no company names are mentioned, do NOT invent or guess any; do not include any intitle: terms.
    - Only use company names as described above; do not default to including known brands unless explicitly mentioned as preference/background.
 
-5. Construct the X-Ray query using:
+Important Notes:
 - Include the job title, skills, and the domain/industry if available
 - site:{country_code}.linkedin.com/in/
 - Use {country_code} only when country is mentioned and not when only city or state is mentioned
@@ -197,10 +197,8 @@ Step-by-Step Instructions:
 - Use AND OR boolean in all the X-ray search query
 - Keep the x-ray search query minimal for optimal & high quality  Google search results
 
-6. If the user query is not about a candidate search, then do not generate the x-ray query at all (this is a very important rule). You can simply return "Error: 422".
-
 Output Format:
-- Output only the final Google search query (as plain text, no backticks or explanation).`;
+- Output only the final Google search query (as plain text, no backticks or explanation)`;
 
     let xrayQuery = (await callGemini({
       messages: [
