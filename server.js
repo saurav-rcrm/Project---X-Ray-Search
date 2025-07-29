@@ -167,35 +167,32 @@ app.post('/api/process-job', async (req, res) => {
 Think step-by-step to create an effective and compact query.
 
 Step-by-Step Instructions:
-1. Extract:
+
+1. Extract keywords:
 - Job title
 - 3 to 5 core skills or keywords
 - Domain/industry (e.g., SaaS, Fintech, Automobile, etc.)
-- Country or location (if present)
-- Don't add 'location:{value}' rather just {value} when needed
 - Preferred or Target Company names (e.g., intitle:"Google" OR intitle:"Recruit CRM")
+- Country or location (only if present and required)
 
 2. Determine if this is a fresher/entry-level role:
 - Check for phrases like: fresher, graduate, trainee, training program, entry-level
-
-3. Decide on exclusions:
 - If it is NOT a fresher role, use -intitle:"intern" -intitle:"student"
 - If it IS a fresher role, do NOT include exclusions like -intitle:"intern" -intitle:"student"
 
-4. Decide on company usage:
-   - Hiring company: If the input or job description names the hiring company (the one hiring for this role), NEVER include this company in the query.
-   - Preferred/target company backgrounds: If company names are mentioned as *preferred/target backgrounds* (not the hiring company), include each company using intitle:"[Company]", e.g., intitle:"google" OR intitle:"amazon".
-   - No company names mentioned: If no company names are mentioned, do NOT invent or guess any; do not include any intitle: terms.
-   - Only use company names as described above; do not default to including known brands unless explicitly mentioned as preference/background.
+4. Decide on company name:
+   - Hiring company: If the user input implies the name of the hiring company (the company hiring for this role), NEVER include this company in the query.
+   - Preferred or Target company backgrounds: If company names are mentioned as *preferred/target backgrounds* (not the hiring company), include each company using intitle:"[Company]", e.g., intitle:"google" OR intitle:"amazon".
+   - If NO company names are mentioned, do NOT invent or guess any; do not include any intitle:"{company_name}"
+   - Only use company names as described above; do not default to including known brands unless explicitly mentioned as preferred background or from target companies.
 
 Important Notes:
-- Include the job title, skills, and the domain/industry if available
-- site:{country_code}.linkedin.com/in/
-- Use {country_code} only when country is mentioned and not when only city or state is mentioned
-- Enclose multi-word phrases in quotes (e.g., "Product Manager", etc.)
+- Use site:{country_code}.linkedin.com/in/ only when country is mentioned and not when only city or state is mentioned. E.g., site:de.linkedin.com/in OR fr.linkedin.com/in OR uk.linkedin.com/in, etc.
+- Enclose multi-word phrases in quotes (e.g., "Product Manager", "Customer Success Manager", etc.)
 - Use AND to add multiple required keywords, use OR to offer alternatives
-- Use AND OR boolean in all the X-ray search query
-- Keep the x-ray search query minimal for optimal & high quality  Google search results
+- Use AND OR boolean in all the X-ray search queries for better results
+- Important to keep the X-ray search query output minimal for optimal & high-quality Google search results
+- Don't add 'location:{value}' rather just {value} when needed
 
 Output Format:
 - Output only the final Google search query (as plain text, no backticks or explanation)`;
