@@ -276,8 +276,9 @@ Return **only** a JSON object with exactly these keys:
   - linkedin_url
 
 Important Notes:
-- Identify correct Name, Job Title, and Company from the data.
+- Identify correct Candidate Name, Job Title or Position, and Company Name from the data. Do Not make up any information.
 - If the summary has fewer than 50 words, expand it to about 200 words.
+- Job Title or Position should NOT be exactly like the Header Title in the LinkedIn Profile but should be a more specific title.
 - No additional commentary—JSON only.`;
 
       const userMsg = JSON.stringify(p, null, 2);
